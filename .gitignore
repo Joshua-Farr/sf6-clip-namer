@@ -1,0 +1,17 @@
+.pytest_cache/
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.log
+
+# YouTube OAuth secrets/tokens (never commit)
+client_secret.json
+token.json
+upload_state.json
+**/client_secret*.json
+
+# Buckler / CFN session material (never commit)
+buckler_cookie.txt
+**/buckler_cookie*.txt
+latest_match.json

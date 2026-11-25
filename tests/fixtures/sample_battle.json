@@ -1,0 +1,21 @@
+{
+  "replay_id": "ABC123XYZ",
+  "uploaded_at": 1732572842,
+  "replay_battle_type_name": "Ranked Match",
+  "player1_info": {
+    "player": {"fighter_id": "TestPlayer", "short_id": 88475682},
+    "playing_character_name": "Ken",
+    "character_name": "Ken",
+    "master_rating": 1600,
+    "league_point": 0,
+    "round_results": [1, 1]
+  },
+  "player2_info": {
+    "player": {"fighter_id": "OpponentCFN", "short_id": 999001},
+    "playing_character_name": "Ryu",
+    "character_name": "Ryu",
+    "master_rating": 1550,
+    "league_point": 0,
+    "round_results": [0, 0]
+  }
+}
