@@ -10,7 +10,7 @@ M.DEFAULTS = {
   -- Prefer REFramework battle bridge (match_start → restart buffer,
   -- match_end → save). Falls back to CFN-only if the bridge file is absent.
   use_battle_bridge = true,
-  battle_status_path = "", -- empty = %AppData%\sf6-clip-namer\battle_status.json
+  battle_status_path = "", -- empty = <SF6>\reframework\data\sf6_obs_battle_status.json
   -- How often to check CFN (naming + backup save) while SF6 is running.
   auto_poll_seconds = 40,
   -- How often to check whether StreetFighter6.exe is running.

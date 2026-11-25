@@ -73,12 +73,23 @@ local function replay_save(obs)
   return true, nil
 end
 
+-- REFramework writes into <SF6>\reframework\data (see sf6_obs_battle_bridge.lua).
+local STATUS_FILE = "sf6_obs_battle_status.json"
+local SF6_DATA_DIRS = {
+  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Street Fighter 6\\reframework\\data\\",
+  "C:\\Program Files\\Steam\\steamapps\\common\\Street Fighter 6\\reframework\\data\\",
+}
+
 local function default_battle_status_path()
-  local base = os.getenv("APPDATA")
-  if not base or base == "" then
-    return ""
+  for _, dir in ipairs(SF6_DATA_DIRS) do
+    local f = io.open(dir .. STATUS_FILE, "rb")
+    if f then
+      f:close()
+      return dir .. STATUS_FILE
+    end
   end
-  return base .. "\\sf6-clip-namer\\battle_status.json"
+  -- Not written yet: return the most likely path so polling starts once the bridge runs.
+  return SF6_DATA_DIRS[1] .. STATUS_FILE
 end
 
 local function read_battle_status(path)
@@ -209,10 +220,12 @@ function State:_handle_bridge_event(ev)
   if not ev then
     return
   end
-  if self._last_bridge_seq == ev.seq then
+  -- seq restarts when REFramework reloads, so key on seq + timestamp.
+  local key = tostring(ev.seq) .. "@" .. tostring(ev.t or 0)
+  if self._last_bridge_seq == key then
     return
   end
-  self._last_bridge_seq = ev.seq
+  self._last_bridge_seq = key
   self._bridge_seen = true
 
   if ev.state == "match_start" then

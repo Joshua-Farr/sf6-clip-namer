@@ -12,7 +12,7 @@ This gives true “round 1 → match end” capture.
 Status file:
 
 ```text
-%AppData%\sf6-clip-namer\battle_status.json
+<SF6>\reframework\data\sf6_obs_battle_status.json
 ```
 
 ## Install (once)
