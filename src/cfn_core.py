@@ -65,7 +65,11 @@ def format_rank(
     league_point: Any = None,
     league_rank: Any = None,
 ) -> str:
-    """Human rank label for filenames/titles: MR1600, Diamond, LP1200, etc."""
+    """Title/filename rank suffix: only for Masters (MR####), else empty.
+
+    Below Master we leave titles as score + characters + mode + SF6 only.
+    """
+    del league_point  # unused; kept for call-site compatibility
     try:
         mr = int(master_rating) if master_rating is not None else 0
     except (TypeError, ValueError):
@@ -77,25 +81,8 @@ def format_rank(
         rank_id = int(league_rank) if league_rank is not None else 0
     except (TypeError, ValueError):
         rank_id = 0
-    if rank_id in LEAGUE_RANK_NAMES:
-        name = LEAGUE_RANK_NAMES[rank_id]
-        if name == "Master" and mr <= 0:
-            return "Master"
-        if name != "Master":
-            try:
-                lp = int(league_point) if league_point is not None else 0
-            except (TypeError, ValueError):
-                lp = 0
-            if lp > 0:
-                return f"{name}{lp}"
-            return name
-
-    try:
-        lp = int(league_point) if league_point is not None else 0
-    except (TypeError, ValueError):
-        lp = 0
-    if lp > 0:
-        return f"LP{lp}"
+    if LEAGUE_RANK_NAMES.get(rank_id) == "Master":
+        return "Master"
     return ""
 
 

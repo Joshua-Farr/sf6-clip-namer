@@ -40,7 +40,9 @@ def test_score_and_rank_helpers():
     assert score_string([1, 1], [0, 0]) == "2-0"
     assert score_string([0, 0], [1, 1]) == "0-2"
     assert format_rank(master_rating=1550, league_rank=8) == "MR1550"
-    assert format_rank(master_rating=0, league_rank=7, league_point=1200) == "Diamond1200"
+    # Below Master: omit rank from title/filename.
+    assert format_rank(master_rating=0, league_rank=7, league_point=1200) == ""
+    assert format_rank(master_rating=0, league_rank=8) == "Master"
 
 
 def test_normalize_battle_from_fixture():
