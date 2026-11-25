@@ -28,37 +28,27 @@ SF6Clips\Ken\Ken_vs_Ryu_W_Ranked_2026-11-25_16-14-02.mp4
 ## Data flow
 
 ```text
-User finishes an SF6 match (CFN updates battlelog)
+SF6 launches
         │
-User presses Save Replay Buffer
+        ▼
+AutoCapture starts Replay Buffer + baselines latest CFN match id
+        │
+User finishes a match → CFN battlelog gains a new entry
+        │
+        ▼
+AutoCapture poll (every ~40s) sees new match_id
+        │
+        ▼
+obs_frontend_replay_buffer_save()
         │
         ▼
 OBS_FRONTEND_EVENT_REPLAY_BUFFER_SAVED
         │
         ▼
-SF6Detector: StreetFighter6.exe running?
-        │
-        ▼
-cfn_launcher spawns cfn_fetch.py (hidden, waits)
-        │
-        ▼
-Buckler battlelog (rank + casual page 1) → latest_match.json
-        │
-        ▼
-ResultProvider parses match → MatchTracker eligibility
-        │
-        ▼
-FilenameFormatter builds {my_char}_vs_{opp_char}_{result}_{mode}_{timestamp}
-        │
-        ▼
-(optional) ensure {root}/{character}/
-        │
-        ▼
-FileRenamer waits for unlock, renames/moves safely (never overwrite)
-        │
-        ▼
-(optional) youtube_launcher spawns python youtube_uploader.py
+cfn_launcher → latest_match.json → rename/move → optional YouTube
 ```
+
+Manual Save Replay follows the same rename/upload path.
 
 ## Components
 

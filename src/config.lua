@@ -5,10 +5,18 @@ local M = {}
 
 M.DEFAULTS = {
   enabled = true,
+  -- When on: while SF6 is running, keep Replay Buffer active and auto-save
+  -- when CFN shows a newly completed match (no manual Save hotkey needed).
+  auto_capture = true,
+  -- How often to check CFN for a new match while SF6 is running.
+  auto_poll_seconds = 40,
+  -- How often to check whether StreetFighter6.exe is running.
+  process_check_seconds = 5,
   filename_format = "{my_char}_vs_{opp_char}_{result}_{mode}_{timestamp}",
   -- Date then time. Wall clock is America/Chicago (Central); see format_timestamp.
   timestamp_format = "yyyy-MM-dd_HH-mm-ss",
-  max_age_minutes = 15,
+  -- Allow CFN lag + poll interval after the match ends.
+  max_age_minutes = 20,
   allow_multiple_clips = true,
   debug_logging = false,
   -- Your numeric CFN / Buckler short_id (from profile URL).
@@ -17,7 +25,6 @@ M.DEFAULTS = {
   buckler_cookie_path = "",
   -- Comma-separated Buckler battlelog modes to check (newest across them wins).
   cfn_modes = "rank,casual",
-  -- Used only after a replay save; no background polling.
   rename_delay_ms = 300,
   rename_attempts = 5,
   cfn_fetch_timeout_ms = 12000,

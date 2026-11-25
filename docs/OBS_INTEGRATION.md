@@ -28,7 +28,14 @@ files must stay in the same directory.
 - Keep Replay Buffer enabled while playing SF6
 - Save the buffer shortly after a match ends so CFN history is fresh
 
-## Idle behavior
+## Auto-capture
 
-No background timers and no CFN polling while you play. Network and filesystem
-work start only on `REPLAY_BUFFER_SAVED`.
+When **Auto-capture** is enabled:
+
+- A 1s timer checks whether `StreetFighter6.exe` is running
+- On SF6 start: `obs_frontend_replay_buffer_start()` + CFN baseline (no save)
+- While SF6 runs: poll CFN every N seconds; on new `replay_id`, call
+  `obs_frontend_replay_buffer_save()`
+- Rename/YouTube still run from `REPLAY_BUFFER_SAVED`
+
+Set Replay Buffer duration long enough for a full match (5–10+ minutes).

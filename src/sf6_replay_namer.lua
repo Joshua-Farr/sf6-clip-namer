@@ -1,14 +1,14 @@
 --[[
-  Street Fighter 6 OBS Replay Buffer Auto-Naming
+  Street Fighter 6 OBS Replay Buffer Auto-Naming + Auto-Capture
   Tools → Scripts → +  (add this file; keep sibling modules beside it)
 
-  Renames saved Replay Buffer clips using the latest CFN / Buckler match:
-    {my_char}_vs_{opp_char}_{result}_{mode}_{timestamp}
+  While Street Fighter 6 is running:
+    - Keeps the Replay Buffer active (rolling window)
+    - Polls CFN / Buckler for newly completed matches
+    - Auto-saves the Replay Buffer when a new match appears
+    - Renames/moves into per-character folders and optionally uploads to YouTube
 
-  Organizes clips into per-character folders and optionally uploads to YouTube.
-
-  Idle behavior: no timers, no CFN polling.
-  Work happens only when OBS fires REPLAY_BUFFER_SAVED.
+  Manual Save Replay still works the same way.
 ]]
 
 local obs = obslua
@@ -33,6 +33,7 @@ local match_tracker = require("match_tracker")
 local formatter = require("filename_formatter")
 local renamer = require("file_renamer")
 local youtube_launcher = require("youtube_launcher")
+local auto_capture = require("auto_capture")
 
 local settings_state = config.copy_defaults()
 local provider = result_provider.new({
@@ -45,6 +46,7 @@ local tracker = match_tracker.new({
 
 local pending_rename = nil
 local attempt_pending_rename
+local monitor = nil
 
 local function apply_settings()
   provider:set_cache_path(cfn_launcher.default_cache_path())
@@ -205,25 +207,63 @@ local function on_event(event)
   end
 end
 
+local function ensure_monitor()
+  if not monitor then
+    monitor = auto_capture.new({
+      obs = obs,
+      detector = detector,
+      get_settings = function()
+        return settings_state
+      end,
+      fetch_fn = function(opts)
+        opts = opts or {}
+        opts.cache_path = cfn_launcher.default_cache_path()
+        return cfn_launcher.fetch_latest(opts)
+      end,
+      read_match_fn = function()
+        return provider:get_newest_match()
+      end,
+      tick_ms = 1000,
+    })
+  end
+  monitor:restart()
+end
+
 -- OBS script API -------------------------------------------------------------
 
 function script_description()
-  return [[Street Fighter 6 Replay Buffer Auto-Naming
+  return [[Street Fighter 6 Replay Auto-Capture
 
-Renames Replay Buffer clips to
-{my_char}_vs_{opp_char}_{result}_{mode}_{timestamp} (Central Time)
-using the latest match from CFN / Buckler's Boot Camp. Optionally organizes
-clips into per-character folders and uploads them to YouTube (unlisted).
+While Street Fighter 6 is running, keeps the Replay Buffer active and watches
+CFN / Buckler's Boot Camp. When a new match appears, auto-saves the buffer,
+renames the clip to
+{my_char}_vs_{opp_char}_{result}_{mode}_{timestamp},
+organizes by character, and optionally uploads to YouTube.
 
-Only active while StreetFighter6.exe is running.
-Idle: no background timers or CFN polling.
-Requires a Buckler session cookie (buckler_id) and your numeric CFN short_id.]]
+Set OBS Replay Buffer length to at least ~5–10 minutes so a full match fits
+in the rolling window. CFN updates after the match ends (usually within a
+minute), so enable Auto-capture and leave OBS running while you play.
+
+Requires buckler_id cookie + CFN short_id.]]
 end
 
 function script_properties()
   local props = obs.obs_properties_create()
 
   obs.obs_properties_add_bool(props, "enabled", "Enable SF6 replay naming")
+  obs.obs_properties_add_bool(
+    props,
+    "auto_capture",
+    "Auto-capture (start Replay Buffer + save on new CFN match)"
+  )
+  obs.obs_properties_add_int(
+    props,
+    "auto_poll_seconds",
+    "CFN poll interval while SF6 running (seconds)",
+    20,
+    300,
+    5
+  )
   obs.obs_properties_add_text(props, "cfn_short_id", "CFN short_id (profile URL number)", obs.OBS_TEXT_DEFAULT)
   obs.obs_properties_add_path(
     props,
@@ -285,6 +325,8 @@ end
 function script_defaults(settings)
   local d = config.DEFAULTS
   obs.obs_data_set_default_bool(settings, "enabled", d.enabled)
+  obs.obs_data_set_default_bool(settings, "auto_capture", d.auto_capture)
+  obs.obs_data_set_default_int(settings, "auto_poll_seconds", d.auto_poll_seconds)
   obs.obs_data_set_default_string(settings, "cfn_short_id", d.cfn_short_id)
   obs.obs_data_set_default_string(settings, "buckler_cookie_path", d.buckler_cookie_path)
   obs.obs_data_set_default_string(settings, "cfn_modes", d.cfn_modes)
@@ -303,6 +345,14 @@ end
 
 function script_update(settings)
   settings_state.enabled = obs.obs_data_get_bool(settings, "enabled")
+  settings_state.auto_capture = obs.obs_data_get_bool(settings, "auto_capture")
+  local poll = obs.obs_data_get_int(settings, "auto_poll_seconds")
+  if not poll or poll < 20 then
+    poll = config.DEFAULTS.auto_poll_seconds
+  end
+  settings_state.auto_poll_seconds = poll
+  settings_state.process_check_seconds = config.DEFAULTS.process_check_seconds
+
   settings_state.cfn_short_id = obs.obs_data_get_string(settings, "cfn_short_id") or ""
   local cookie = obs.obs_data_get_string(settings, "buckler_cookie_path")
   if not cookie or cookie == "" then
@@ -354,8 +404,11 @@ function script_update(settings)
   settings_state.youtube_privacy = privacy
   settings_state.debug_logging = obs.obs_data_get_bool(settings, "debug_logging")
   apply_settings()
+  ensure_monitor()
   logger.info(
-    "YouTube upload "
+    "Auto-capture "
+      .. (settings_state.auto_capture and "enabled" or "disabled")
+      .. "; YouTube "
       .. (settings_state.youtube_upload_enabled and "enabled" or "disabled")
   )
 end
@@ -365,10 +418,14 @@ function script_load(settings)
   script_update(settings)
   apply_settings()
   obs.obs_frontend_add_event_callback(on_event)
-  logger.info("Script loaded (event-driven; no background CFN polling)")
+  ensure_monitor()
+  logger.info("Script loaded")
 end
 
 function script_unload()
+  if monitor then
+    monitor:stop()
+  end
   obs.timer_remove(attempt_pending_rename)
   obs.obs_frontend_remove_event_callback(on_event)
   pending_rename = nil

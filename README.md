@@ -13,11 +13,12 @@ Renaming only happens while Street Fighter 6 (`StreetFighter6.exe`) is running.
 If SF6 is closed, or a CFN match cannot be matched confidently, OBS keeps its
 normal filename.
 
-The script is **event-driven**: it does nothing while you play, and only talks
-to Buckler when you save a Replay Buffer clip.
+With **Auto-capture** enabled (default), the script watches CFN while you play
+and saves the Replay Buffer for you when a new match appears—no hotkey needed.
 
 Features:
 
+- **Auto-capture** — starts Replay Buffer when SF6 launches; auto-saves on new CFN matches
 - **Character folders** — store clips under `{root}/{character played}/`
 - **YouTube uploads** — after a successful local rename/move, upload as **Unlisted**
   via the official YouTube Data API (companion Python helper)
@@ -118,12 +119,18 @@ Tokens and upload state live under `%AppData%\sf6-clip-namer\`.
 
 ## Usage
 
-1. Start OBS with Replay Buffer enabled
-2. Launch Street Fighter 6 and play
-3. After a match, press your **Save Replay Buffer** hotkey
-4. The clip is renamed/moved (and optionally uploaded) using CFN history
+1. In OBS → **Settings → Output → Replay Buffer**: set length to **at least 5–10 minutes**
+   (must cover a full match; CFN only updates after the match ends)
+2. Load the script with **Auto-capture** checked
+3. Leave OBS running, launch Street Fighter 6, and play
+4. When CFN shows a new match, the script auto-saves, renames/moves, and uploads
 
-Log lines are prefixed with `[SF6Replay]` in the OBS Script Log.
+Manual **Save Replay Buffer** still works. Log lines use `[SF6Replay]`.
+
+**How auto start/stop works:** CFN has no live “match started” signal. The Replay
+Buffer runs as a rolling window the whole time SF6 is open (“start”). When your
+battlelog gets a new entry (“match over”), the script saves that window (“stop”
+/ export) and sends it to YouTube.
 
 ---
 
