@@ -11,10 +11,12 @@ SRC = ROOT / "src"
 sys.path.insert(0, str(SRC))
 
 from cfn_core import (  # noqa: E402
+    format_rank,
     newest_match,
     normalize_battle,
     normalize_cookie,
     player_won,
+    score_string,
 )
 
 
@@ -34,6 +36,13 @@ def test_player_won():
     assert player_won([]) is False
 
 
+def test_score_and_rank_helpers():
+    assert score_string([1, 1], [0, 0]) == "2-0"
+    assert score_string([0, 0], [1, 1]) == "0-2"
+    assert format_rank(master_rating=1550, league_rank=8) == "MR1550"
+    assert format_rank(master_rating=0, league_rank=7, league_point=1200) == "Diamond1200"
+
+
 def test_normalize_battle_from_fixture():
     battle = json.loads(FIXTURE.read_text(encoding="utf-8"))
     match = normalize_battle(battle, my_short_id=88475682, mode="rank")
@@ -42,7 +51,10 @@ def test_normalize_battle_from_fixture():
     assert match["opp_character"] == "Ryu"
     assert match["opp_name"] == "OpponentCFN"
     assert match["result"] == "W"
+    assert match["score"] == "2-0"
     assert match["mode"] == "rank"
+    assert match["mode_label"] == "Ranked"
+    assert match["opp_rank"] == "MR1550"
     assert match["match_id"] == "ABC123XYZ"
     assert match["completed_at"] == 1732572842
 

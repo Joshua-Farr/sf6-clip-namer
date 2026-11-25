@@ -5,14 +5,21 @@ local M = {}
 
 M.DEFAULTS = {
   enabled = true,
-  -- When on: while SF6 is running, keep Replay Buffer active and auto-save
-  -- when CFN shows a newly completed match (no manual Save hotkey needed).
+  -- When on: while SF6 is running, keep Replay Buffer active and auto-save.
   auto_capture = true,
-  -- How often to check CFN for a new match while SF6 is running.
+  -- Prefer REFramework battle bridge (match_start → restart buffer,
+  -- match_end → save). Falls back to CFN-only if the bridge file is absent.
+  use_battle_bridge = true,
+  battle_status_path = "", -- empty = %AppData%\sf6-clip-namer\battle_status.json
+  -- How often to check CFN (naming + backup save) while SF6 is running.
   auto_poll_seconds = 40,
   -- How often to check whether StreetFighter6.exe is running.
   process_check_seconds = 5,
-  filename_format = "{my_char}_vs_{opp_char}_{result}_{mode}_{timestamp}",
+  -- After a match_end save, retry CFN naming this many times (CFN lags).
+  cfn_rename_retries = 12,
+  cfn_rename_retry_ms = 5000,
+  -- Example: "0-2 Cammy vs Ryu Ranked SF6 MR1550"
+  filename_format = "{score} {my_char} vs {opp_char} {mode} SF6 {opp_rank}",
   -- Date then time. Wall clock is America/Chicago (Central); see format_timestamp.
   timestamp_format = "yyyy-MM-dd_HH-mm-ss",
   -- Allow CFN lag + poll interval after the match ends.

@@ -13,15 +13,16 @@ Renaming only happens while Street Fighter 6 (`StreetFighter6.exe`) is running.
 If SF6 is closed, or a CFN match cannot be matched confidently, OBS keeps its
 normal filename.
 
-With **Auto-capture** enabled (default), the script watches CFN while you play
-and saves the Replay Buffer for you when a new match appears—no hotkey needed.
+With **Auto-capture** + **REFramework**, the script restarts the Replay Buffer at
+**match start** and saves at **match end**, then renames from CFN and uploads to
+YouTube—no hotkey needed.
 
 Features:
 
-- **Auto-capture** — starts Replay Buffer when SF6 launches; auto-saves on new CFN matches
+- **Match-start capture** — REFramework detects battle start/end in-game
+- **Auto-capture** — restarts Replay Buffer at round 1; saves when the match ends
 - **Character folders** — store clips under `{root}/{character played}/`
 - **YouTube uploads** — after a successful local rename/move, upload as **Unlisted**
-  via the official YouTube Data API (companion Python helper)
 - **CFN match metadata** — character, opponent, W/L, mode, replay id
 
 ---
@@ -119,18 +120,12 @@ Tokens and upload state live under `%AppData%\sf6-clip-namer\`.
 
 ## Usage
 
-1. In OBS → **Settings → Output → Replay Buffer**: set length to **at least 5–10 minutes**
-   (must cover a full match; CFN only updates after the match ends)
-2. Load the script with **Auto-capture** checked
-3. Leave OBS running, launch Street Fighter 6, and play
-4. When CFN shows a new match, the script auto-saves, renames/moves, and uploads
+1. Install **REFramework** + the battle bridge (see [REFramework setup](docs/REFRAMEWORK_SETUP.md))
+2. OBS → **Settings → Output → Replay Buffer**: set length to **5–10+ minutes**, then restart the buffer
+3. Load the script with **Auto-capture** and **Use REFramework match start/end bridge** checked
+4. Leave OBS open, launch SF6, play — clips save/rename/upload after each match
 
 Manual **Save Replay Buffer** still works. Log lines use `[SF6Replay]`.
-
-**How auto start/stop works:** CFN has no live “match started” signal. The Replay
-Buffer runs as a rolling window the whole time SF6 is open (“start”). When your
-battlelog gets a new entry (“match over”), the script saves that window (“stop”
-/ export) and sends it to YouTube.
 
 ---
 
@@ -161,6 +156,7 @@ python src/cfn_fetch.py fetch --short-id YOUR_ID
 
 Docs:
 
+- [REFramework setup](docs/REFRAMEWORK_SETUP.md) ← match start/end
 - [Architecture](docs/ARCHITECTURE.md)
 - [CFN data source](docs/CFN_DATA_SOURCE.md)
 - [OBS integration](docs/OBS_INTEGRATION.md)

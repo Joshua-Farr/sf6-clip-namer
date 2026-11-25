@@ -17,6 +17,20 @@ function M.sanitize_component(value)
   return s
 end
 
+--- Keep spaces for readable titles like "0-2 Cammy vs Ryu Ranked SF6 MR1550".
+--- Only strip filesystem-illegal characters.
+function M.sanitize_filename(value)
+  if value == nil then
+    return ""
+  end
+  local s = tostring(value)
+  s = s:gsub(INVALID_CHARS, " ")
+  s = s:gsub("%s+", " ")
+  s = s:gsub("^%s+", ""):gsub("%s+$", "")
+  s = s:gsub("[%.%s]+$", "")
+  return s
+end
+
 --- Sanitize a character name for use as a directory name.
 --- Keeps spaces; only replaces filesystem-illegal characters.
 function M.sanitize_dir_name(value)
@@ -138,14 +152,18 @@ local function nonempty(value)
   return s
 end
 
---- YouTube title: "Ken vs Ryu W (Ranked)" style, max 100 chars.
+--- YouTube title: "0-2 Cammy vs Ryu Ranked SF6 MR1550" style, max 100 chars.
 function M.build_youtube_title(match)
   match = match or {}
+  local score = nonempty(match.score) or nonempty(match.result) or "?"
   local my = nonempty(match.my_character) or "?"
   local opp = nonempty(match.opp_character) or "?"
-  local result = nonempty(match.result) or "?"
   local mode = nonempty(match.mode_label) or nonempty(match.mode) or "Match"
-  local title = string.format("%s vs %s %s (%s)", my, opp, result, mode)
+  local rank = nonempty(match.opp_rank)
+  local title = string.format("%s %s vs %s %s SF6", score, my, opp, mode)
+  if rank then
+    title = title .. " " .. rank
+  end
   if #title > 100 then
     title = title:sub(1, 100)
   end
@@ -184,7 +202,15 @@ function M.build_youtube_description(unix_time, match)
   if mode then
     lines[#lines + 1] = "Mode: " .. mode
   end
-  if my_mr or opp_mr then
+  local score = nonempty(match.score)
+  local opp_rank = nonempty(match.opp_rank)
+  local my_rank = nonempty(match.my_rank)
+  if score then
+    lines[#lines + 1] = "Score: " .. score
+  end
+  if my_rank or opp_rank then
+    lines[#lines + 1] = "Rank: " .. (my_rank or "?") .. " vs " .. (opp_rank or "?")
+  elseif my_mr or opp_mr then
     lines[#lines + 1] = "MR: " .. (my_mr or "?") .. " vs " .. (opp_mr or "?")
   end
   if replay_id then
@@ -207,24 +233,38 @@ function M.split_extension(path)
 end
 
 --- Build a target filename (name only) from format and match data.
+--- Default keeps spaces: "0-2 Cammy vs Ryu Ranked SF6 MR1550"
 function M.build_basename(fmt, match, timestamp_str)
   match = match or {}
-  local my = M.sanitize_component(match.my_character)
-  local opp = M.sanitize_component(match.opp_character)
-  local result = M.sanitize_component(match.result)
-  local mode = M.sanitize_component(match.mode or match.mode_label)
-  local ts_s = M.sanitize_component(timestamp_str)
-  if my == "" or opp == "" or result == "" then
+  local score = M.sanitize_filename(match.score or match.result)
+  local my = M.sanitize_filename(match.my_character)
+  local opp = M.sanitize_filename(match.opp_character)
+  local result = M.sanitize_filename(match.result)
+  local mode = M.sanitize_filename(match.mode_label or match.mode)
+  local opp_rank = M.sanitize_filename(match.opp_rank)
+  local my_rank = M.sanitize_filename(match.my_rank)
+  local opp_name = M.sanitize_filename(match.opp_name)
+  local ts_s = M.sanitize_filename(timestamp_str)
+  if my == "" or opp == "" then
     return nil
   end
-  local name = fmt or "{my_char}_vs_{opp_char}_{result}_{mode}_{timestamp}"
+  if score == "" and result == "" then
+    return nil
+  end
+  local name = fmt or "{score} {my_char} vs {opp_char} {mode} SF6 {opp_rank}"
+  name = name:gsub("{score}", score)
   name = name:gsub("{my_char}", my)
   name = name:gsub("{opp_char}", opp)
   name = name:gsub("{result}", result)
   name = name:gsub("{mode}", mode)
-  name = name:gsub("{opp_name}", M.sanitize_component(match.opp_name))
+  name = name:gsub("{opp_rank}", opp_rank)
+  name = name:gsub("{my_rank}", my_rank)
+  name = name:gsub("{opp_name}", opp_name)
   name = name:gsub("{timestamp}", ts_s)
-  name = M.sanitize_component(name)
+  name = M.sanitize_filename(name)
+  -- Drop a trailing "SF6" dangling space if opp_rank was empty.
+  name = name:gsub("%s+SF6%s*$", " SF6")
+  name = name:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
   if name == "" then
     return nil
   end

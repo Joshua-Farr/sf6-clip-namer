@@ -12,6 +12,18 @@ MODE_LABELS = {
     "extreme": "Extreme",
 }
 
+# Buckler league_rank ids (community-observed).
+LEAGUE_RANK_NAMES = {
+    1: "Rookie",
+    2: "Iron",
+    3: "Bronze",
+    4: "Silver",
+    5: "Gold",
+    6: "Platinum",
+    7: "Diamond",
+    8: "Master",
+}
+
 
 def normalize_cookie(raw: str) -> str:
     """Accept `buckler_id=VALUE`, bare VALUE, or a full Cookie header."""
@@ -26,12 +38,65 @@ def normalize_cookie(raw: str) -> str:
     return text
 
 
-def player_won(round_results: list[Any] | None) -> bool:
+def round_wins(round_results: list[Any] | None) -> int:
     """Buckler: 0 = lost round for this player; non-zero = won that round."""
     if not round_results:
-        return False
-    wins = sum(1 for r in round_results if r)
-    return wins >= 2
+        return 0
+    return sum(1 for r in round_results if r)
+
+
+def player_won(round_results: list[Any] | None) -> bool:
+    return round_wins(round_results) >= 2
+
+
+def score_string(my_results: list[Any] | None, opp_results: list[Any] | None) -> str:
+    """Return 'my-opp' round score from each side's perspective, e.g. '0-2'."""
+    mine = round_wins(my_results)
+    theirs = round_wins(opp_results)
+    # If opponent results missing, infer from my losses.
+    if not opp_results and my_results:
+        theirs = sum(1 for r in my_results if not r)
+    return f"{mine}-{theirs}"
+
+
+def format_rank(
+    *,
+    master_rating: Any = None,
+    league_point: Any = None,
+    league_rank: Any = None,
+) -> str:
+    """Human rank label for filenames/titles: MR1600, Diamond, LP1200, etc."""
+    try:
+        mr = int(master_rating) if master_rating is not None else 0
+    except (TypeError, ValueError):
+        mr = 0
+    if mr > 0:
+        return f"MR{mr}"
+
+    try:
+        rank_id = int(league_rank) if league_rank is not None else 0
+    except (TypeError, ValueError):
+        rank_id = 0
+    if rank_id in LEAGUE_RANK_NAMES:
+        name = LEAGUE_RANK_NAMES[rank_id]
+        if name == "Master" and mr <= 0:
+            return "Master"
+        if name != "Master":
+            try:
+                lp = int(league_point) if league_point is not None else 0
+            except (TypeError, ValueError):
+                lp = 0
+            if lp > 0:
+                return f"{name}{lp}"
+            return name
+
+    try:
+        lp = int(league_point) if league_point is not None else 0
+    except (TypeError, ValueError):
+        lp = 0
+    if lp > 0:
+        return f"LP{lp}"
+    return ""
 
 
 def character_name(info: dict[str, Any] | None) -> str:
@@ -65,9 +130,15 @@ def short_id_of(info: dict[str, Any] | None) -> int | None:
 
 
 def mode_label(mode: str, battle_type_name: str | None = None) -> str:
+    """Short label for titles/filenames (Ranked, Casual, …)."""
+    short = MODE_LABELS.get(mode)
+    if short:
+        return short
     if battle_type_name:
-        return str(battle_type_name)
-    return MODE_LABELS.get(mode, mode.title() if mode else "Match")
+        # "Ranked Match" → "Ranked"
+        name = str(battle_type_name).replace(" Match", "").strip()
+        return name or "Match"
+    return mode.title() if mode else "Match"
 
 
 def normalize_battle(
@@ -92,7 +163,10 @@ def normalize_battle(
     else:
         return None
 
-    result = "W" if player_won(me.get("round_results")) else "L"
+    my_rounds = me.get("round_results")
+    opp_rounds = opp.get("round_results")
+    result = "W" if player_won(my_rounds) else "L"
+    score = score_string(my_rounds, opp_rounds)
     uploaded_at = battle.get("uploaded_at")
     try:
         completed_at = int(uploaded_at)
@@ -103,6 +177,17 @@ def normalize_battle(
     if not replay_id:
         return None
 
+    opp_rank = format_rank(
+        master_rating=opp.get("master_rating"),
+        league_point=opp.get("league_point"),
+        league_rank=opp.get("league_rank"),
+    )
+    my_rank = format_rank(
+        master_rating=me.get("master_rating"),
+        league_point=me.get("league_point"),
+        league_rank=me.get("league_rank"),
+    )
+
     return {
         "match_id": replay_id,
         "replay_id": replay_id,
@@ -111,12 +196,17 @@ def normalize_battle(
         "opp_character": character_name(opp),
         "opp_name": fighter_name(opp),
         "result": result,
+        "score": score,
         "mode": mode,
         "mode_label": mode_label(mode, battle.get("replay_battle_type_name")),
         "my_mr": me.get("master_rating"),
         "opp_mr": opp.get("master_rating"),
         "my_lp": me.get("league_point"),
         "opp_lp": opp.get("league_point"),
+        "my_league_rank": me.get("league_rank"),
+        "opp_league_rank": opp.get("league_rank"),
+        "my_rank": my_rank,
+        "opp_rank": opp_rank,
         "fetched_at": None,
     }
 

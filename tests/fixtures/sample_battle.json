@@ -8,6 +8,7 @@
     "character_name": "Ken",
     "master_rating": 1600,
     "league_point": 0,
+    "league_rank": 8,
     "round_results": [1, 1]
   },
   "player2_info": {
@@ -16,6 +17,7 @@
     "character_name": "Ryu",
     "master_rating": 1550,
     "league_point": 0,
+    "league_rank": 8,
     "round_results": [0, 0]
   }
 }

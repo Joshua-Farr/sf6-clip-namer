@@ -165,12 +165,17 @@ function M.normalize_match(raw)
     opp_character = opp,
     opp_name = trim(raw.opp_name),
     result = result,
+    score = trim(raw.score),
     mode = trim(raw.mode),
     mode_label = trim(raw.mode_label),
     my_mr = raw.my_mr,
     opp_mr = raw.opp_mr,
     my_lp = raw.my_lp,
     opp_lp = raw.opp_lp,
+    my_league_rank = raw.my_league_rank,
+    opp_league_rank = raw.opp_league_rank,
+    my_rank = trim(raw.my_rank),
+    opp_rank = trim(raw.opp_rank),
     fetched_at = tonumber(raw.fetched_at),
   }, nil
 end

@@ -47,6 +47,9 @@ local tracker = match_tracker.new({
 local pending_rename = nil
 local attempt_pending_rename
 local monitor = nil
+local last_named_match_id = nil
+local cfn_retry = nil
+local attempt_cfn_retry
 
 local function apply_settings()
   provider:set_cache_path(cfn_launcher.default_cache_path())
@@ -120,9 +123,7 @@ local function schedule_rename(source, dest, match, character_folder, youtube_ti
   obs.timer_add(attempt_pending_rename, settings_state.rename_delay_ms)
 end
 
-local function handle_replay_saved()
-  logger.info("Replay buffer saved")
-
+local function process_saved_replay(source_override, allow_cfn_retry)
   if not settings_state.enabled then
     logger.debug("Disabled; skipping rename")
     return
@@ -132,7 +133,6 @@ local function handle_replay_saved()
     logger.debug("Street Fighter 6 not running; preserving OBS name")
     return
   end
-  logger.info("Street Fighter 6 detected")
 
   local fetch_ok, fetch_err = cfn_launcher.fetch_latest({
     short_id = settings_state.cfn_short_id,
@@ -143,27 +143,48 @@ local function handle_replay_saved()
     cache_path = cfn_launcher.default_cache_path(),
   })
   if not fetch_ok then
+    if allow_cfn_retry then
+      logger.warn("CFN fetch failed; will retry naming. " .. tostring(fetch_err))
+      return "retry"
+    end
     logger.warn("CFN fetch failed; preserving OBS name. " .. tostring(fetch_err))
-    return
+    return "fail"
   end
 
   local match, match_err = provider:get_newest_match()
   if not match then
+    if allow_cfn_retry then
+      logger.debug("No match yet; will retry naming. " .. tostring(match_err))
+      return "retry"
+    end
     logger.debug("No match available: " .. tostring(match_err))
-    return
+    return "fail"
+  end
+
+  local match_id = tostring(match.match_id or "")
+  if allow_cfn_retry and match_id ~= "" and match_id == last_named_match_id then
+    logger.info("CFN still on previous match; waiting for battlelog update")
+    return "retry"
   end
 
   tracker:set_latest(match)
   local eligible, reason = tracker:match_for_replay(os.time())
   if not eligible then
+    if allow_cfn_retry then
+      logger.debug("Match not eligible yet (" .. tostring(reason) .. "); retrying")
+      return "retry"
+    end
     logger.debug("No eligible match: " .. tostring(reason))
-    return
+    return "fail"
   end
 
-  local source = obs.obs_frontend_get_last_replay()
+  local source = source_override
+  if not source or source == "" then
+    source = obs.obs_frontend_get_last_replay()
+  end
   if not source or source == "" then
     logger.warn("Could not determine replay output path")
-    return
+    return "fail"
   end
 
   local source_dir, _, ext = formatter.split_extension(source)
@@ -172,7 +193,7 @@ local function handle_replay_saved()
   local basename = formatter.build_basename(settings_state.filename_format, eligible, ts)
   if not basename then
     logger.warn("Could not build filename; preserving original")
-    return
+    return "fail"
   end
 
   local youtube_title = formatter.build_youtube_title(eligible)
@@ -195,10 +216,64 @@ local function handle_replay_saved()
   local dest = formatter.unique_path(dest_dir, basename, ext, renamer.file_exists)
   if not dest then
     logger.warn("Could not allocate unique filename; preserving original")
+    return "fail"
+  end
+
+  last_named_match_id = match_id
+  schedule_rename(source, dest, eligible, character_folder, youtube_title, youtube_description)
+  return "ok"
+end
+
+attempt_cfn_retry = function()
+  if not cfn_retry then
+    return
+  end
+  cfn_retry.attempts = cfn_retry.attempts + 1
+  logger.info(
+    string.format(
+      "CFN naming retry %d/%d",
+      cfn_retry.attempts,
+      cfn_retry.max_attempts
+    )
+  )
+  local result = process_saved_replay(cfn_retry.source, true)
+  if result == "ok" then
+    cfn_retry = nil
+    obs.timer_remove(attempt_cfn_retry)
+    return
+  end
+  if cfn_retry.attempts >= cfn_retry.max_attempts then
+    logger.warn("CFN naming retries exhausted; leaving OBS filename")
+    cfn_retry = nil
+    obs.timer_remove(attempt_cfn_retry)
+  end
+end
+
+local function handle_replay_saved()
+  logger.info("Replay buffer saved")
+
+  if not settings_state.enabled then
+    logger.debug("Disabled; skipping rename")
     return
   end
 
-  schedule_rename(source, dest, eligible, character_folder, youtube_title, youtube_description)
+  if not detector.is_running() then
+    logger.debug("Street Fighter 6 not running; preserving OBS name")
+    return
+  end
+  logger.info("Street Fighter 6 detected")
+
+  local source = obs.obs_frontend_get_last_replay()
+  local result = process_saved_replay(source, true)
+  if result == "retry" then
+    cfn_retry = {
+      source = source,
+      attempts = 0,
+      max_attempts = tonumber(settings_state.cfn_rename_retries) or 12,
+    }
+    obs.timer_remove(attempt_cfn_retry)
+    obs.timer_add(attempt_cfn_retry, tonumber(settings_state.cfn_rename_retry_ms) or 5000)
+  end
 end
 
 local function on_event(event)
@@ -234,17 +309,13 @@ end
 function script_description()
   return [[Street Fighter 6 Replay Auto-Capture
 
-While Street Fighter 6 is running, keeps the Replay Buffer active and watches
-CFN / Buckler's Boot Camp. When a new match appears, auto-saves the buffer,
-renames the clip to
-{my_char}_vs_{opp_char}_{result}_{mode}_{timestamp},
-organizes by character, and optionally uploads to YouTube.
+With REFramework installed, detects live match start/end in-game:
+  - Match start → restart Replay Buffer (clip begins at round 1)
+  - Match end → save → rename from CFN → optional YouTube upload
 
-Set OBS Replay Buffer length to at least ~5–10 minutes so a full match fits
-in the rolling window. CFN updates after the match ends (usually within a
-minute), so enable Auto-capture and leave OBS running while you play.
-
-Requires buckler_id cookie + CFN short_id.]]
+Falls back to CFN-only auto-save if the battle bridge is missing.
+Set Replay Buffer length to at least ~5–10 minutes.
+Requires buckler_id cookie + CFN short_id + REFramework bridge script.]]
 end
 
 function script_properties()
@@ -254,7 +325,12 @@ function script_properties()
   obs.obs_properties_add_bool(
     props,
     "auto_capture",
-    "Auto-capture (start Replay Buffer + save on new CFN match)"
+    "Auto-capture (Replay Buffer + match detect)"
+  )
+  obs.obs_properties_add_bool(
+    props,
+    "use_battle_bridge",
+    "Use REFramework match start/end bridge"
   )
   obs.obs_properties_add_int(
     props,
@@ -326,6 +402,7 @@ function script_defaults(settings)
   local d = config.DEFAULTS
   obs.obs_data_set_default_bool(settings, "enabled", d.enabled)
   obs.obs_data_set_default_bool(settings, "auto_capture", d.auto_capture)
+  obs.obs_data_set_default_bool(settings, "use_battle_bridge", d.use_battle_bridge)
   obs.obs_data_set_default_int(settings, "auto_poll_seconds", d.auto_poll_seconds)
   obs.obs_data_set_default_string(settings, "cfn_short_id", d.cfn_short_id)
   obs.obs_data_set_default_string(settings, "buckler_cookie_path", d.buckler_cookie_path)
@@ -346,12 +423,16 @@ end
 function script_update(settings)
   settings_state.enabled = obs.obs_data_get_bool(settings, "enabled")
   settings_state.auto_capture = obs.obs_data_get_bool(settings, "auto_capture")
+  settings_state.use_battle_bridge = obs.obs_data_get_bool(settings, "use_battle_bridge")
   local poll = obs.obs_data_get_int(settings, "auto_poll_seconds")
   if not poll or poll < 20 then
     poll = config.DEFAULTS.auto_poll_seconds
   end
   settings_state.auto_poll_seconds = poll
   settings_state.process_check_seconds = config.DEFAULTS.process_check_seconds
+  settings_state.cfn_rename_retries = config.DEFAULTS.cfn_rename_retries
+  settings_state.cfn_rename_retry_ms = config.DEFAULTS.cfn_rename_retry_ms
+  settings_state.battle_status_path = config.DEFAULTS.battle_status_path
 
   settings_state.cfn_short_id = obs.obs_data_get_string(settings, "cfn_short_id") or ""
   local cookie = obs.obs_data_get_string(settings, "buckler_cookie_path")
@@ -367,8 +448,12 @@ function script_update(settings)
   settings_state.cfn_modes = modes
 
   settings_state.filename_format = obs.obs_data_get_string(settings, "filename_format")
-  if not settings_state.filename_format or settings_state.filename_format == "" then
+  local legacy_fmt = "{my_char}_vs_{opp_char}_{result}_{mode}_{timestamp}"
+  if not settings_state.filename_format
+    or settings_state.filename_format == ""
+    or settings_state.filename_format == legacy_fmt then
     settings_state.filename_format = config.DEFAULTS.filename_format
+    obs.obs_data_set_string(settings, "filename_format", settings_state.filename_format)
   end
   settings_state.timestamp_format = obs.obs_data_get_string(settings, "timestamp_format")
   if not settings_state.timestamp_format or settings_state.timestamp_format == "" then
@@ -427,8 +512,10 @@ function script_unload()
     monitor:stop()
   end
   obs.timer_remove(attempt_pending_rename)
+  obs.timer_remove(attempt_cfn_retry)
   obs.obs_frontend_remove_event_callback(on_event)
   pending_rename = nil
+  cfn_retry = nil
   logger.info("Script unloaded")
 end
 

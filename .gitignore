@@ -4,6 +4,8 @@ __pycache__/
 .venv/
 venv/
 *.log
+staging/
+third_party/
 
 # YouTube OAuth secrets/tokens (never commit)
 client_secret.json
