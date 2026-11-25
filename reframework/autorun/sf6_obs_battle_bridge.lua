@@ -55,28 +55,41 @@ local function write_status(state, reason)
   end
 end
 
+-- Returns raw fight_st (number) or nil, plus an error string when unreadable.
+-- Errors are logged once per distinct message so failures are visible.
 local function read_fight_state()
-  local gBattle = sdk.find_type_definition("gBattle")
-  if not gBattle then
-    return "none"
+  local td = sdk.find_type_definition("gBattle")
+  if not td then
+    return nil, "gBattle type definition not found"
   end
 
-  local ok, fight_st = pcall(function()
-    local sGame = gBattle:get_field("Game"):get_data(nil)
-    if not sGame then
-      return nil
-    end
+  local okg, sGame = pcall(function()
+    return td:get_field("Game"):get_data(nil)
+  end)
+  if not okg or sGame == nil then
+    return nil, "gBattle.Game unavailable: " .. tostring(sGame)
+  end
+
+  local ok, st = pcall(function()
     return sGame.fight_st
   end)
-
-  if not ok or fight_st == nil then
-    return "none"
+  if not ok or st == nil then
+    ok, st = pcall(function()
+      return sGame:get_field("fight_st")
+    end)
+  end
+  if not ok or st == nil then
+    return nil, "fight_st unavailable: " .. tostring(st)
   end
 
-  if fight_st == 0 then
+  return st
+end
+
+local function classify(st)
+  if st == 0 then
     return "none"
   end
-  if fight_st == 7 then
+  if st == 7 then
     return "finished"
   end
   return "running"
@@ -84,9 +97,24 @@ end
 
 local pending_state = nil
 local pending_count = 0
+local last_raw = nil
+local last_err = nil
+local raw_logs = 0
 
 re.on_frame(function()
-  local state = read_fight_state()
+  local raw, err = read_fight_state()
+  if err then
+    if err ~= last_err then
+      last_err = err
+      log.info("[sf6_obs_bridge] " .. err)
+    end
+  elseif raw ~= last_raw and raw_logs < 200 then
+    last_raw = raw
+    raw_logs = raw_logs + 1
+    log.info("[sf6_obs_bridge] fight_st=" .. tostring(raw))
+  end
+
+  local state = raw ~= nil and classify(raw) or "none"
 
   if state ~= pending_state then
     pending_state = state

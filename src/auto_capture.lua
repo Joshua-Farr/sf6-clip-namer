@@ -133,6 +133,7 @@ function State:_on_sf6_started()
   self._ms_since_cfn_poll = 0
   self._last_bridge_seq = nil
   self._bridge_seen = false
+  self._pending_bridge_saves = 0
   self._in_match = false
   self._restart_phase = nil
   if not replay_active(self.obs) then
@@ -214,6 +215,7 @@ function State:_save_for_match_end(reason)
     return
   end
   self._save_cooldown_until = now + 8
+  self._pending_bridge_saves = (self._pending_bridge_saves or 0) + 1
 end
 
 function State:_handle_bridge_event(ev)
@@ -292,16 +294,15 @@ function State:_poll_cfn(baseline_only)
     return
   end
 
-  -- When the REFramework bridge is active, it owns start/stop. CFN is only a
-  -- backup save trigger if we somehow missed match_end.
-  if self._bridge_seen and self._in_match == false then
-    local settings2 = self:_settings()
-    if settings2.use_battle_bridge ~= false then
-      self._baseline_id = id
-      self._last_saved_id = id
-      logger.debug("CFN advanced while bridge active (already saved or between matches)")
-      return
-    end
+  -- Each bridge match_end save already covers one CFN match. Consume that
+  -- credit here so the same match is not saved twice. If the bridge never
+  -- fired (no credit), CFN saves the clip as a backup.
+  if (self._pending_bridge_saves or 0) > 0 then
+    self._pending_bridge_saves = self._pending_bridge_saves - 1
+    self._baseline_id = id
+    self._last_saved_id = id
+    logger.info("CFN match " .. id .. " already saved by bridge; skipping backup save")
+    return
   end
 
   logger.info(
