@@ -63,6 +63,12 @@ local function maybe_queue_youtube(dest_path, youtube_title, youtube_description
     logger.info("YouTube upload disabled in script settings; skipping")
     return
   end
+  logger.info(
+    "Uploading to YouTube ("
+      .. tostring(settings_state.youtube_privacy)
+      .. "): "
+      .. tostring(youtube_title or dest_path)
+  )
   local started = youtube_launcher.launch_upload({
     video_path = dest_path,
     title = youtube_title,

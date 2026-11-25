@@ -1,13 +1,18 @@
 -- auto_capture.lua
 -- While SF6 is running:
 --   - Prefer REFramework battle bridge (match_start / match_end)
---   - match_start → restart Replay Buffer (clip begins at round 1)
---   - match_end   → save Replay Buffer (rename + YouTube via existing handler)
+--   - match_start → restart Replay Buffer at the first round of a match
+--   - match_end   → rounds end separately, so wait MATCH_QUIET_SECONDS with no
+--                   new round, then save ONCE for the whole match
+--                   (rename + YouTube via existing handler)
 --   - Fallback: CFN poll auto-save if bridge is idle / unavailable
 
 local M = {}
 
 local logger = require("logger")
+
+-- Seconds with no new round before a match is saved as one clip.
+local MATCH_QUIET_SECONDS = 90
 
 local State = {}
 State.__index = State
@@ -35,6 +40,8 @@ function M.new(opts)
   self._restart_phase = nil -- nil | "stop" | "start"
   self._in_match = false
   self._save_cooldown_until = 0
+  self._pending_match_save_at = nil -- os.time() deadline for the one-per-match save
+  self._pending_match_reason = nil
   return self
 end
 
@@ -134,6 +141,8 @@ function State:_on_sf6_started()
   self._last_bridge_seq = nil
   self._bridge_seen = false
   self._pending_bridge_saves = 0
+  self._pending_match_save_at = nil
+  self._pending_match_reason = nil
   self._in_match = false
   self._restart_phase = nil
   if not replay_active(self.obs) then
@@ -148,6 +157,7 @@ end
 
 function State:_on_sf6_stopped()
   logger.info("SF6 closed — auto-capture idle")
+  self:_flush_pending_match_save()
   self._baseline_id = nil
   self._ms_since_cfn_poll = 0
   self._in_match = false
@@ -198,24 +208,46 @@ function State:_finish_restart_if_needed()
   end
 end
 
-function State:_save_for_match_end(reason)
-  local now = os.time()
-  if now < (self._save_cooldown_until or 0) then
-    logger.debug("Save cooldown active; skipping duplicate match_end")
-    return
-  end
-  self._in_match = false
+-- Save the Replay Buffer once. Returns true if OBS accepted the save.
+function State:_save_clip(reason)
   if not self:_ensure_replay_buffer() then
-    return
+    return false
   end
-  logger.info("Match end (" .. tostring(reason) .. ") — saving Replay Buffer")
+  logger.info("Saving Replay Buffer (" .. tostring(reason) .. ")")
   local saved, save_err = replay_save(self.obs)
   if not saved then
     logger.warn("Auto-save failed: " .. tostring(save_err))
-    return
+    return false
   end
-  self._save_cooldown_until = now + 8
-  self._pending_bridge_saves = (self._pending_bridge_saves or 0) + 1
+  return true
+end
+
+-- A round ended. Rounds of one match end separately, so (re)start a quiet
+-- timer; the match is saved once when no new round starts before it expires.
+function State:_schedule_match_save(reason)
+  self._in_match = false
+  self._pending_match_save_at = os.time() + MATCH_QUIET_SECONDS
+  self._pending_match_reason = reason
+  logger.info(
+    "Round end (" .. tostring(reason) .. ") — saving whole match after "
+      .. MATCH_QUIET_SECONDS .. "s with no new round"
+  )
+end
+
+-- Save the pending match now (quiet timer expired, or SF6 closed).
+function State:_flush_pending_match_save()
+  if not self._pending_match_save_at then
+    return false
+  end
+  local reason = self._pending_match_reason or "match_end"
+  self._pending_match_save_at = nil
+  self._pending_match_reason = nil
+  if self:_save_clip(reason) then
+    -- This save covers one CFN match; CFN must not save it again.
+    self._pending_bridge_saves = (self._pending_bridge_saves or 0) + 1
+    return true
+  end
+  return false
 end
 
 function State:_handle_bridge_event(ev)
@@ -231,9 +263,15 @@ function State:_handle_bridge_event(ev)
   self._bridge_seen = true
 
   if ev.state == "match_start" then
-    self:_restart_buffer_for_match()
+    if self._pending_match_save_at then
+      -- Next round of the same match: keep the buffer so the clip covers it.
+      self._in_match = true
+      logger.info("Next round started — keeping Replay Buffer for the same match")
+    else
+      self:_restart_buffer_for_match()
+    end
   elseif ev.state == "match_end" then
-    self:_save_for_match_end(ev.reason or "bridge")
+    self:_schedule_match_save(ev.reason or "bridge")
   elseif ev.state == "idle" then
     logger.info("REFramework battle bridge connected")
   end
@@ -291,6 +329,17 @@ function State:_poll_cfn(baseline_only)
 
   if id == self._baseline_id or id == self._last_saved_id then
     logger.debug("CFN poll: no new match")
+    return
+  end
+
+  -- CFN lists the match before the quiet timer ran out: save now, covering it.
+  if self._pending_match_save_at then
+    self._pending_match_save_at = nil
+    self._pending_match_reason = nil
+    if self:_save_clip("CFN match " .. id) then
+      self._last_saved_id = id
+      self._baseline_id = id
+    end
     return
   end
 
@@ -356,6 +405,10 @@ function State:_tick()
 
   self:_finish_restart_if_needed()
   self:_poll_bridge()
+
+  if self._pending_match_save_at and os.time() >= self._pending_match_save_at then
+    self:_flush_pending_match_save()
+  end
 
   -- Keep buffer alive unless we are mid-restart.
   if not self._restart_phase then
