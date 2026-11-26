@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from pathlib import Path
@@ -21,6 +22,7 @@ from youtube_paths import (  # noqa: E402
 )
 from youtube_state import STATUS_FAILED, UploadStateStore  # noqa: E402
 from youtube_upload import upload_video  # noqa: E402
+from sheets_log import add_match_row, prepare_sheet  # noqa: E402
 
 
 def _setup_logging(verbose: bool = False) -> None:
@@ -55,6 +57,57 @@ def cmd_auth(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_sheets_auth(args: argparse.Namespace) -> int:
+    """One-time Google Sheets consent (separate token from YouTube)."""
+    try:
+        info = prepare_sheet(
+            args.sheet,
+            client_secret_path=Path(args.client_secret) if args.client_secret else None,
+            interactive=True,
+        )
+    except AuthError as exc:
+        logging.error("%s", exc)
+        return 1
+    except Exception as exc:  # noqa: BLE001
+        logging.error("Sheets auth/setup failed: %s", exc)
+        return 1
+    logging.info("Sheets ready: tab '%s', columns: %s", info["tab"], ", ".join(info["headers"]))
+    return 0
+
+
+def _read_match_file(path_str: str | None) -> dict | None:
+    if not path_str:
+        return None
+    path = Path(path_str)
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logging.warning("Could not read match file %s: %s", path, exc)
+        return None
+    finally:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _log_to_sheet(args: argparse.Namespace, match: dict, result: dict) -> None:
+    """Best effort: a sheet problem must never fail an upload."""
+    fields = dict(match)
+    fields["vod"] = result.get("youtube_url") or ""
+    try:
+        info = add_match_row(
+            args.sheet,
+            fields,
+            client_secret_path=Path(args.client_secret) if args.client_secret else None,
+        )
+        logging.info("Logged match to training sheet (tab '%s')", info["tab"])
+    except AuthError as exc:
+        logging.warning("Training sheet not updated: %s", exc)
+    except Exception as exc:  # noqa: BLE001
+        logging.error("Training sheet not updated: %s", exc)
+
+
 def cmd_upload(args: argparse.Namespace) -> int:
     path = Path(args.path)
     client_secret = Path(args.client_secret) if args.client_secret else None
@@ -66,6 +119,7 @@ def cmd_upload(args: argparse.Namespace) -> int:
             Path(args.description_file).unlink(missing_ok=True)
         except OSError:
             pass
+    match = _read_match_file(args.match_file)
     try:
         result = upload_video(
             path,
@@ -95,6 +149,8 @@ def cmd_upload(args: argparse.Namespace) -> int:
         path.name,
         result.get("youtube_url") or result.get("youtube_video_id"),
     )
+    if args.sheet and match is not None:
+        _log_to_sheet(args, match, result)
     return 0
 
 
@@ -226,7 +282,25 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["unlisted", "private", "public"],
         help="YouTube privacy status",
     )
+    upload.add_argument(
+        "--match-file",
+        default=None,
+        help="JSON with match details for the training sheet (deleted after read)",
+    )
+    upload.add_argument(
+        "--sheet",
+        default=None,
+        help="Google Sheet URL/ID to log the match to after upload",
+    )
     upload.set_defaults(func=cmd_upload)
+
+    sheets_auth = sub.add_parser(
+        "sheets-auth",
+        parents=[shared],
+        help="One-time Google Sheets consent and header setup",
+    )
+    sheets_auth.add_argument("--sheet", required=True, help="Google Sheet URL or ID")
+    sheets_auth.set_defaults(func=cmd_sheets_auth)
 
     retry = sub.add_parser(
         "retry-failed",

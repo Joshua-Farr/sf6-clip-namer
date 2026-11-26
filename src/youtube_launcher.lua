@@ -102,6 +102,41 @@ local function resolve_pythonw(path)
   return candidate
 end
 
+local JSON_ESCAPES = {
+  ['"'] = '\\"',
+  ["\\"] = "\\\\",
+  ["\n"] = "\\n",
+  ["\r"] = "\\r",
+  ["\t"] = "\\t",
+}
+
+--- Encode a flat table of string/number/boolean values as a JSON object.
+local function encode_flat_json(tbl)
+  local keys = {}
+  for k, v in pairs(tbl) do
+    local t = type(v)
+    if t == "string" or t == "number" or t == "boolean" then
+      keys[#keys + 1] = k
+    end
+  end
+  table.sort(keys)
+  local parts = {}
+  for _, k in ipairs(keys) do
+    local v = tbl[k]
+    local encoded
+    if type(v) == "string" then
+      local escaped = v:gsub('[%c"\\]', function(c)
+        return JSON_ESCAPES[c] or string.format("\\u%04x", c:byte())
+      end)
+      encoded = '"' .. escaped .. '"'
+    else
+      encoded = tostring(v)
+    end
+    parts[#parts + 1] = '"' .. k .. '":' .. encoded
+  end
+  return "{" .. table.concat(parts, ",") .. "}"
+end
+
 --- Run a command with no console window.
 local function run_hidden(command_line)
   if win_silent.run_hidden(command_line) then
@@ -200,6 +235,22 @@ function M.launch_upload(opts)
   if desc_file then
     parts[#parts + 1] = "--description-file"
     parts[#parts + 1] = win_quote(desc_file)
+  end
+  -- Optional: log the match to the training notes sheet after the upload.
+  local sheet = opts.sheet or ""
+  if sheet ~= "" and type(opts.match) == "table" then
+    local match_file = unique_temp("sf6_match", "json")
+    local mf = io.open(match_file, "wb")
+    if mf then
+      mf:write(encode_flat_json(opts.match))
+      mf:close()
+      parts[#parts + 1] = "--match-file"
+      parts[#parts + 1] = win_quote(match_file)
+      parts[#parts + 1] = "--sheet"
+      parts[#parts + 1] = win_quote(sheet)
+    else
+      logger.warn("Could not write match file; training sheet row skipped")
+    end
   end
   local cmdline = table.concat(parts, " ")
 

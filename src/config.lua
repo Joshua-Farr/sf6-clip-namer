@@ -44,6 +44,8 @@ M.DEFAULTS = {
   youtube_privacy = "unlisted",
   youtube_client_secret_path = "",
   youtube_python_path = "",
+  -- Google Sheet URL for training notes (empty = off). One row per uploaded match.
+  training_sheet_url = "",
 }
 
 function M.copy_defaults()

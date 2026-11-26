@@ -58,10 +58,37 @@ local function apply_settings()
   logger.set_debug(settings_state.debug_logging)
 end
 
-local function maybe_queue_youtube(dest_path, youtube_title, youtube_description)
+--- Match details for the training notes sheet (one row per uploaded match).
+local function build_sheet_match(match)
+  if type(match) ~= "table" then
+    return nil
+  end
+  local ts = os.time()
+  return {
+    date = formatter.format_timestamp(ts, "yyyy-MM-dd"),
+    time = formatter.format_timestamp(ts, "HH:mm:ss"),
+    mode = match.mode_label or match.mode,
+    my_character = match.my_character,
+    opp_character = match.opp_character,
+    opp_name = match.opp_name,
+    result = match.result,
+    score = match.score,
+    my_mr = match.my_mr,
+    opp_mr = match.opp_mr,
+    my_rank = match.my_rank,
+    opp_rank = match.opp_rank,
+    replay_id = match.replay_id or match.match_id,
+  }
+end
+
+local function maybe_queue_youtube(dest_path, youtube_title, youtube_description, match)
   if not settings_state.youtube_upload_enabled then
     logger.info("YouTube upload disabled in script settings; skipping")
     return
+  end
+  local sheet_url = settings_state.training_sheet_url or ""
+  if sheet_url ~= "" then
+    logger.info("Match will be added to the training notes sheet after upload")
   end
   logger.info(
     "Uploading to YouTube ("
@@ -76,6 +103,8 @@ local function maybe_queue_youtube(dest_path, youtube_title, youtube_description
     privacy = settings_state.youtube_privacy,
     python_path = settings_state.youtube_python_path,
     client_secret_path = settings_state.youtube_client_secret_path,
+    sheet = sheet_url,
+    match = build_sheet_match(match),
   })
   if started then
     youtube_launcher.notify(
@@ -101,7 +130,7 @@ attempt_pending_rename = function()
       logger.info("Folder: " .. job.character_folder)
     end
     tracker:mark_used(job.match)
-    maybe_queue_youtube(job.dest, job.youtube_title, job.youtube_description)
+    maybe_queue_youtube(job.dest, job.youtube_title, job.youtube_description, job.match)
     pending_rename = nil
     obs.timer_remove(attempt_pending_rename)
     return
@@ -395,6 +424,12 @@ function script_properties()
   )
   obs.obs_properties_add_text(
     props,
+    "training_sheet_url",
+    "Training notes Google Sheet URL (empty = off)",
+    obs.OBS_TEXT_DEFAULT
+  )
+  obs.obs_properties_add_text(
+    props,
     "youtube_python_path",
     "Python executable (empty = pythonw)",
     obs.OBS_TEXT_DEFAULT
@@ -423,6 +458,7 @@ function script_defaults(settings)
   obs.obs_data_set_default_string(settings, "youtube_privacy", d.youtube_privacy)
   obs.obs_data_set_default_string(settings, "youtube_client_secret_path", d.youtube_client_secret_path)
   obs.obs_data_set_default_string(settings, "youtube_python_path", d.youtube_python_path)
+  obs.obs_data_set_default_string(settings, "training_sheet_url", d.training_sheet_url)
   obs.obs_data_set_default_bool(settings, "debug_logging", d.debug_logging)
 end
 
@@ -474,6 +510,8 @@ function script_update(settings)
     obs.obs_data_get_string(settings, "youtube_client_secret_path") or ""
   settings_state.youtube_python_path =
     obs.obs_data_get_string(settings, "youtube_python_path") or ""
+  settings_state.training_sheet_url =
+    (obs.obs_data_get_string(settings, "training_sheet_url") or ""):match("^%s*(.-)%s*$")
 
   local has_toggle = obs.obs_data_has_user_value
     and obs.obs_data_has_user_value(settings, "youtube_upload_enabled")
